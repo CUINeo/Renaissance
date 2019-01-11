@@ -3,6 +3,7 @@
 
 #define ENTRY_PER_PAGE 1024     // table entries per page
 
+#include "rbtree.h"
 #include <zjunix/vm.h>
 
 // VMA operations

@@ -11,7 +11,7 @@
 #include "fscache.h"
 #endif  // ! FS_DEBUG
 
-#define DIR_DATA_BUF_NUM 4
+
 /* fat buffer clock head */
 u32 fat_clock_head = 0;
 BUF_512 fat_buf[FAT_BUF_NUM];

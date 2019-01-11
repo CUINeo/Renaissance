@@ -371,13 +371,15 @@ int prog(unsigned int argc, void *args){
     int loop = 0;
     while(1){
         cnt ++;
-        if(cnt == 5000000){
-            kernel_printf("......\n");
+        if(cnt == 8000000){
+            if(running_task->type == TYPE_FRONT) // 后台运行的进程屏蔽输出
+                kernel_printf("......\n");
             loop++;
             cnt = 0;
         }
-        if(loop == 5){
-            kernel_printf("Exiting...\n");
+        if(loop == 10){
+            if(running_task->type == TYPE_FRONT) // 后台运行的进程屏蔽输出
+                kernel_printf("Exiting...\n");
             break;
         }
     }
@@ -528,8 +530,7 @@ struct task_struct* find_next_task(){
         // 根据O(1) scheduler的调度算法，将running_task移至过期队列
         move_to_expire(running_task);
         
-        // TODO: 根据动态优先级调整调度队列
-
+        // 调用sched_find_first_bit函数找到优先级最高的队列
         first_bit = sched_find_first_bit();
 
         if(first_bit == -1){
@@ -568,7 +569,11 @@ struct task_struct* get_curr_pcb() {
  * @func: 满足系统调用，在init_pc中注册pc_kill_syscall
  */
 void pc_kill_syscall(unsigned int status, unsigned int cause, context* pt_context) {
-    
+    // 由syscall kill某进程, 该函数完成当前进程的退出与调度的上下文切换
+
+
+    // 直接调用pc_schedule完成调度
+    pc_schedule(status, cause, pt_context);
 }
 
 
@@ -760,9 +765,15 @@ void reset_active(){
             // reset counter 
             pcb->counter = basic_time_slice[i];
 
-            // reset dynamic_priority
+            // reset dynamic_priority(except shell)
             // (according to the process type FRONT/BACK)
             if(pcb->avg_sleep >= 250){
+
+                // shell进程永远保持最高优先级 即shell进程不参与动态优先级调度
+                // if(pcb->pid == 2){
+                //     break;
+                // }
+
                 if(pcb->type == TYPE_FRONT){
                     if(pcb->static_priority >= 3){
                         pcb->avg_sleep = 0;
@@ -779,8 +790,11 @@ void reset_active(){
                         pcb->avg_sleep = 0;
                     }
                 }
+                else
+                    break;
             }
-
+            // if(pcb->static_priority < 0 || pcb->static_priority > MAX_PRIO)
+            //     break;
             // add_sched函数接收pcb和priority为参数，并将对应bitmap置1
             add_sched(pcb, pcb->static_priority);
         }
@@ -789,6 +803,22 @@ void reset_active(){
     return;
 }
 
+/* add_sleep_time
+ * @func: 在pc_schedule时为除了当前进程的其他进程增加avg_sleep
+ */
+void add_sleep_time(){
+    struct task_struct *next;
+    struct list_head *p;
+    
+    list_for_each(p, &tasks_list){
+        next = container_of(p, struct task_struct, tasks_node);
+        if(next != running_task){
+            next->avg_sleep++;
+        }   
+    }
+    return ;
+
+}
 
 
 /* find_in_sched
@@ -868,16 +898,26 @@ void print_pcb(struct task_struct *task) {
     
     // 暂定为输出这些信息，需要debug或者最后修改的时候随时可变
 
-    kernel_printf("%s\t %d\t\t %d\t\t",task->name, task->pid, task->parent);
+    kernel_printf("%s\t %d\t\t  %d\t\t",task->name, task->pid, task->parent);
 
+    // 输出进程的类型: FRONT/BACK
+    if(task->type == TYPE_FRONT)
+        kernel_printf("FRONT\t");
+    else if(task->type == TYPE_BACK)
+        kernel_printf("BACK \t");
+
+    // 输出进程的状态: READY/RUNNING/WAITING/EXITED
     if(task->state == STATE_READY)
-        kernel_printf("READY\n");
+        kernel_printf("READY\t");
     else if(task->state == STATE_RUNNING)
-        kernel_printf("RUNNING\n");
+        kernel_printf("RUNNING\t");
     else if(task->state == STATE_WAITING)
-        kernel_printf("WAITING\n");
+        kernel_printf("WAITING\t");
     else if(task->state == STATE_EXITED)
-        kernel_printf("EXITED\n");
+        kernel_printf("EXITED\t");
+
+    // 输出进程当前所在的优先级
+    kernel_printf("\t%d\n", task->static_priority);
 
     return;
 }
@@ -893,7 +933,7 @@ void print_proc(){
 
     running_task->state = STATE_RUNNING; // easy implementation
 
-    kernel_printf("NAME\t PID\t PPID\t STATE\n");
+    kernel_printf("NAME\t PID\t PPID\t STATE\t TYPE\t CUR_PRIO\n");
     
     list_for_each(p, &tasks_list){
         next = container_of(p, struct task_struct, tasks_node);
@@ -902,7 +942,71 @@ void print_proc(){
     return ;
 }
 
+/* print_ready
+ * @func: 输出ready进程队列中的进程信息
+ */
+void print_ready(){
+    struct task_struct *next;
+    struct list_head *p;
 
+    running_task->state = STATE_RUNNING; // easy implementation
+
+    kernel_printf("NAME\t PID\t PPID\t STATE\t TYPE\t CUR_PRIO\n");
+    
+    list_for_each(p, &ready_list){
+        next = container_of(p, struct task_struct, state_node);
+        print_pcb(next);
+    }
+    return ;
+}
+
+/* print_running
+ * @func: 输出当前运行进程的信息
+ */
+void print_running(){
+    running_task->state = STATE_RUNNING; // easy implementation
+
+    kernel_printf("NAME\t PID\t PPID\t STATE\t TYPE\t CUR_PRIO\n");
+    
+    print_pcb(running_task);
+    return ;
+}
+
+/* print_waiting
+ * @func: 输出当前正在等待进程的信息
+ */
+void print_waiting(){
+    struct task_struct *next;
+    struct list_head *p;
+
+    running_task->state = STATE_RUNNING; // easy implementation
+
+    kernel_printf("NAME\t PID\t PPID\t STATE\t TYPE\t CUR_PRIO\n");
+    
+    list_for_each(p, &waiting_list){
+        next = container_of(p, struct task_struct, state_node);
+        print_pcb(next);
+    }
+    return ;
+}
+
+/* print_exited
+ * @func: 输出已退出进程的信息
+ */
+void print_exited(){
+    struct task_struct *next;
+    struct list_head *p;
+
+    running_task->state = STATE_RUNNING;
+
+    kernel_printf("NAME\t PID\t PPID\t STATE\t TYPE\t CUR_PRIO\n");
+    
+    list_for_each(p, &exit_list){
+        next = container_of(p, struct task_struct, state_node);
+        print_pcb(next);
+    }
+    return ;
+}
 
 /* print_sched
  * @func: 输出所有调度链表，在debug阶段十分重要
@@ -933,25 +1037,111 @@ void print_sched(){
     return ;
 }
 
+/* pc_create_back()
+ * @func: 创建后台进程
+ */ 
+int pc_create_back(char *task_name, void(*entry)(unsigned int argc, void *args), 
+                    int static_priority, unsigned int argc, void *args){
 
+    // 分配新进程的pid
+    pid_t pid;
+    if(pid_alloc(&pid) != 0){
+        // 输出错误信息
+        kernel_printf("pc_create: pid_allocate fail!\n");
+        return 0;
+    }else{
+        // debug信息
+        kernel_printf("pc_create: process %s <- pid %d allocated\n", task_name, pid);
+    }
+    
+    union task_union *pcb_union;
+    pcb_union = (union task_union*) kmalloc(sizeof(union task_union));
+    if (pcb_union == 0) {
+        // 输出错误信息
+        kernel_printf("do fork: task union allocated failed!\n");
+        return 0;
+    }
+    struct task_struct *pproc = running_task; //当前进程为新创建进程的父进程
+    unsigned int init_gp; // heap起始位置
+
+    // 对task_union维护的PCB信息进行初始化
+    kernel_strcpy(pcb_union->task.name, task_name); // 进程名
+    pcb_union->task.type = TYPE_BACK; // **创建后台进程**
+    pcb_union->task.pid = pid; // pid
+    pcb_union->task.parent = pproc->pid; // parent pid
+    pcb_union->task.state = STATE_READY; // state
+    
+    pcb_union->task.avg_sleep = 0; // avg_sleep penalty on priority
+
+    // 静态优先级通过参数设置
+    pcb_union->task.static_priority = static_priority;
+    pcb_union->task.counter = basic_time_slice[pcb_union->task.static_priority];
+
+    INIT_LIST_HEAD(&(pcb_union->task.sched_node)); // 调度链表
+    INIT_LIST_HEAD(&(pcb_union->task.state_node)); // 状态链表
+    INIT_LIST_HEAD(&(pcb_union->task.tasks_node)); // 所有进程链表
+
+    // regs_context初始化
+    kernel_memset(&(pcb_union->task.context), 0, sizeof(struct regs_context));
+    
+    pcb_union->task.context.epc = (unsigned int)entry; //设置新进程入口地址
+    pcb_union->task.context.sp = (unsigned int)pcb_union + KERNEL_STACK_SIZE; //设置新进程内核栈
+    asm volatile("la %0, _gp\n\t" : "=r"(init_gp)); 
+    pcb_union->task.context.gp = init_gp; 
+    pcb_union->task.context.a0 = argc; // a0存储参数个数
+    pcb_union->task.context.a1 = (unsigned int)args; // a1存储参数
+
+    // 将进程控制块加入状态链表和调度链表
+    add_tasks_queue(&(pcb_union->task)); // 加入所有进程队列
+    add_ready_queue(&(pcb_union->task)); // 加入就绪状态队列(等待被调度)
+
+    add_sched(&(pcb_union->task), 0);
+    kernel_printf("Current task is %s\n", running_task->name);
+
+    return 1;
+}
+
+
+/* kernel_exec_back
+ * @func: 内核态创建后台进程，默认优先级从TYPE_BACK的最高优先级向下调度
+ *        可以把死循环的进程loop放在后台的优先级进行调度，尽量少的影响shell运行
+ */
+int kernel_exec_back(unsigned int argc, void *args){
+    int create_flag = 0;
+    kernel_printf("Enters function kernel_exec_back.\n");
+
+    // kernel_exec_back's static_priority use 4 as default
+    create_flag = pc_create_back(args, (void*)loop, 4, argc, args);
+
+    if(!create_flag){
+        kernel_printf("kernel_exec_back: task_create failed!");
+        return 0;
+    }else{
+        kernel_printf("kernel_exec_back: task_create success!");
+    }
+
+    return 1;
+}
 
 
 // =========== 为顶层调用提供接口进行其他功能的测试 ============= ///
 
 
 
-/*
- * 需要加一个多进程调度的测试函数
+/* 测试多进程调度的入口函数
+ * @func: 需要加一个多进程调度的测试函数
  */
 int test_sched(unsigned int argc, void *args){
 
-
+    // 输出提示信息，表明进入进程
+    kernel_printf("Testing Scheduling Algorithm: PID[%d]\n", running_task->pid);
+    
+    // TODO 同时创建多个不同优先级、不同类型的进程
+    // 完整测试调度算法的全面性
 
 
     return 1;
 }
-
-
 
 
 /* loop进程入口函数
@@ -972,10 +1162,15 @@ int loop(unsigned int argc, void *args){
     // 结束提示信息
     pc_exit();
     kernel_printf("Task End: PID[%d]\n", running_task->pid);
+
     return 1;
 }
 
 
+/* execvm
+ * @func: 给虚拟内存的测试提供接口，对应shell命令execvm
+ *        用户态not finished 但虚拟内存的测试已经完成了
+ */
 int kernel_execvm(unsigned int argc, void *args){
     int create_flag = 0;
     kernel_printf("Enters function kernel_execvm.\n");
@@ -991,6 +1186,7 @@ int kernel_execvm(unsigned int argc, void *args){
 
     return 1;
 }
+
 
 /* vmprog 入口函数
  */
@@ -1021,26 +1217,112 @@ int vmprog(unsigned int argc, void *args) {
     kernel_getchar();
     
     //进程退出
-    pc_exit(0);
+    pc_exit();
     return 0;
 }
 
 
-/* add_sleep_time
- * @func: 在pc_schedule时为除了当前进程的其他进程增加avg_sleep
- */
-void add_sleep_time(){
-    struct task_struct *next;
-    struct list_head *p;
-    
-    list_for_each(p, &tasks_list){
-        next = container_of(p, struct task_struct, tasks_node);
-        if(next != running_task){
-            next->avg_sleep++;
-        }   
-    }
-    return ;
 
+/* kernel_bg: 将前台进程转移到后台运行
+ * @func: 将前台进程转移到后台运行
+          直接在shell中调用bg <pid>
+ */
+int kernel_bg(pid_t pid){
+
+    struct task_struct *task;
+    // idle和init进程无法被改变类型(一直是后台进程)
+    if(pid == 0 || pid == 1){
+        kernel_printf("IDLE/INIT process's type cannot be changed.\n");
+        goto err;
+    }
+
+    // 检查pid是否被分配
+    if(pid_check(pid) == 0){ // pid_check(pid_t pid) defined in zjunix/pid.h
+        kernel_printf("PID[%d] task not found.\n", pid);
+        goto err;
+    }
+
+    // 获取目标进程的进程控制块
+    task = find_in_tasks(pid);
+    if(task == 0){
+        goto err;
+    }
+    else{
+        if(task->state == STATE_EXITED){
+            kernel_printf("Exited task cannot be moved to background.\n");
+            goto err;
+        }else if(task == running_task){
+            kernel_printf("Shell cannot be moved to background.\n");
+            goto err;
+        }else if(task->type == TYPE_BACK){
+            kernel_printf("PID[%d] task has already been a BACKGOURND task.\n", pid);
+            goto err;
+        }else{
+            // 将一个前台进程调度到后台
+            task->type = TYPE_BACK;
+
+            // 相对优先级
+            task->static_priority += 4;
+        }
+    }
+
+    return 0;
+
+err: 
+    kernel_printf("Error: kernel_bg cannot be executed.\n");
+    return 1;
+}
+
+
+
+/* kernel_fg
+ * @func: 将后台进程转移到前台运行 
+          直接在shell中调用fg <pid>
+ */
+int kernel_fg(pid_t pid){
+
+    struct task_struct *task;
+    // idle和init进程无法被改变类型(一直是后台进程)
+    if(pid == 0 || pid == 1){
+        kernel_printf("IDLE/INIT process's type cannot be changed.\n");
+        goto err;
+    }
+
+    // 检查pid是否被分配
+    if(pid_check(pid) == 0){ // pid_check(pid_t pid) defined in zjunix/pid.h
+        kernel_printf("PID[%d] task not found.\n", pid);
+        goto err;
+    }
+
+    // 获取目标进程的进程控制块
+    task = find_in_tasks(pid);
+    if(task == 0){
+        goto err;
+    }
+    else{
+        if(task->state == STATE_EXITED){
+            kernel_printf("Exited task cannot be moved to front.\n");
+            goto err;
+        }else if(task == running_task){
+            kernel_printf("Shell has been a front task.\n");
+            goto err;
+        }else if(task->type == TYPE_FRONT){
+            kernel_printf("PID[%d] task has already been a FRONT task.\n", pid);
+            goto err;
+        }else{
+            // 将一个后台进程调度到前台
+            task->type = TYPE_FRONT;
+
+            // 相对优先级
+            task->static_priority -= 4;
+        }
+    }
+
+    return 0;
+
+err: 
+    kernel_printf("Error: kernel_fg cannot be executed.\n");
+    return 1;
 }
 
 

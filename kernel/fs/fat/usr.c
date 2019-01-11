@@ -3,6 +3,7 @@
 #include <driver/vga.h>
 #include "utils.h"
 #include "fat.h"
+#include "../../usr/cd.h"
 
 FILE file_create;
 u8 mk_dir_buf[32];
@@ -18,7 +19,7 @@ u32 fs_rm(u8 *filename) {
 	{
 		goto fs_rm_err;
 	}
-
+	kernel_printf("RM has open the src file\n");
 	//修改mark值
 	mk_dir.entry.data[0] = 0xE5;
 	//释放申请的所有块
@@ -36,6 +37,7 @@ u32 fs_rm(u8 *filename) {
 		goto fs_rm_err;
 	return 0;
 fs_rm_err:
+	kernel_printf("Rm failed\n");
 	return 1;
 
 }
@@ -72,7 +74,7 @@ fs_rmdir_err:
 }
 
 //实现文件的移动
-u32 fs_mv(u8 *src, u8 *dest)
+/*u32 fs_mv(u8 *src, u8 *dest)
 {
 	u32 k;
 	FILE mv_dir;
@@ -103,6 +105,39 @@ u32 fs_mv(u8 *src, u8 *dest)
 	return 0;
 fs_mv_err:
 	return 1;
+}*/
+
+u32 fs_mv(u8 *src, u8 *dest)
+{
+	kernel_printf("src:%s\n", src);
+	kernel_printf("dest:%s\n", dest);
+
+	if (str_len(src) == str_len(dest))
+	{
+		kernel_printf("src == equal\n");
+		if (str_equal(src, dest, str_len(dest)) == 1)
+		{
+			kernel_printf("Error\n");
+			return 1;
+		}
+	} 
+	else {
+		kernel_printf("Begin copy\n");
+		if(fs_cp(src, dest) == 1)
+		{
+			kernel_printf ("Error.\n");
+			return 1;
+		}
+		kernel_printf("Finish copy\n");
+		kernel_printf("Begin rm file src %s\n", src);
+		if (fs_rm(src) == 1)
+		{
+			kernel_printf("Error\n");
+			return 1;
+		}
+		kernel_printf("Rm Finish\n");
+	}
+	return 0;
 }
 
 //文件复制
@@ -126,7 +161,7 @@ u32 fs_cp(u8 *src, u8 *dest)
 	u32 file_size = get_entry_filesize(cp_dir.entry.data);
 	u8 *buf = (u8 *)kmalloc(file_size + 1);
 	fs_read(&cp_dir, buf, file_size);
-	for(k=0; k < 32; k++)
+	for(k=0; k < 11; k++)
 	{
 		file_create.entry.data[k] = mk_dir_buf[k];
 	}

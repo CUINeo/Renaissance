@@ -56,7 +56,7 @@ u32 fs_open_dir(FS_FAT_DIR *dir, u8 *filename) {
 
         /* open first sector */
         index = fs_read_512(dir_data_buf, dir->cur_sector, &dir_data_clock_head, DIR_DATA_BUF_NUM);
-         kernel_printf("Open first sector");
+         kernel_printf("Open first sector\n");
         if (index == 0xffffffff)
             goto fs_open_dir_err;
     }
@@ -78,7 +78,7 @@ u32 fs_read_dir(FS_FAT_DIR *dir, u8 *buf) {
     index = fs_read_512(dir_data_buf, dir->cur_sector, &dir_data_clock_head, DIR_DATA_BUF_NUM);
     if (index == 0xffffffff)
         goto fs_read_dir_err;
-
+    //kernel_printf("I am in fs_read_dir\n");
     while (1) {
         for (sec = dir->sec; sec <= fat_info.BPB.attr.sectors_per_cluster; sec++) {
             /* Find directory entry in current cluster */

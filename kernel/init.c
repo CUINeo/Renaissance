@@ -34,7 +34,7 @@ void machine_info() {
 void create_startup_process() {
     kernel_printf("Creating startup process...\n");
     int res;
-    res = pc_create("shell", (void*)ps, 2, 0, 0);
+    res = pc_create("shell", (void*)ps, 1, 0, 0);
     if(res != 1)
     kernel_printf("shell created fail!\n");
     else
@@ -61,12 +61,10 @@ void init_kernel() {
     init_slab();
     log(LOG_OK, "Slab.");
     log(LOG_END, "Memory Modules.");
-// #ifndef VFS_DEBUG
-//     // File system
-//     log(LOG_START, "File System.");
-//     init_fs();
-//     log(LOG_END, "File System.");
-// #endif
+    // File system
+    log(LOG_START, "File System.");
+    init_fs();
+    log(LOG_END, "File System.");
 // #ifdef VFS_DEBUG
 //     // Virtual file system
 //     log(LOG_START, "Virtual file System.");

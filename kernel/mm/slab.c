@@ -166,6 +166,7 @@ void slab_free(struct kmem_cache *cache, void * object) {
     unsigned char full;
 
     if (!s_head->nr_objs) {
+        return;
         kernel_printf("ERROR: slab free error!\n");
         while (1)
             ;
@@ -182,9 +183,7 @@ void slab_free(struct kmem_cache *cache, void * object) {
     opage->slabp = (unsigned int)object;
     s_head->nr_objs--;
 
-#ifdef SLAB_DEBUG
     kernel_printf("nr_objs:%d\tslabp:%x\n", s_head->nr_objs, opage->slabp);
-#endif  // ! SLAB_DEBUG
 
     if (list_empty(&(opage->list)))
         // cpu

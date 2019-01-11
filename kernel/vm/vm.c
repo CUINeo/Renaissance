@@ -21,7 +21,7 @@ struct mm_struct *mm_create()
     if (mm == 0) {
         // alloc fail
 #ifdef VMA_DEBUG
-        kernel_printf("create fail", mm);
+        kernel_printf("create fail!\n");
 #endif
         return 0;
     }
@@ -33,7 +33,7 @@ struct mm_struct *mm_create()
         if (mm->pgd == 0) {
             // alloc fail
 #ifdef VMA_DEBUG
-            kernel_printf("create fail", mm);
+            kernel_printf("create fail\n");
 #endif
             kfree(mm);
             return 0;
@@ -41,7 +41,7 @@ struct mm_struct *mm_create()
         else {
             // alloc success
 #ifdef VMA_DEBUG
-            kernel_printf("create success", mm);
+            kernel_printf("create success\n");
 #endif
             kernel_memset(mm->pgd, 0, PAGE_SIZE);
             return mm;
@@ -59,7 +59,7 @@ void mm_delete(struct mm_struct *mm)
     exit_mmap(mm);
     kfree(mm);
 #ifdef VMA_DEBUG
-    kernel_printf("delete success", mm);
+    kernel_printf("delete success\n");
 #endif
 }
 
@@ -108,7 +108,7 @@ void pgd_delete(pgd_t *pgd)
 #endif
         kfree(pgd);
 #ifdef VMA_DEBUG
-        kernel_printf("pgd deleted");
+        kernel_printf("pgd deleted\n");
 #endif
         return;
     }
