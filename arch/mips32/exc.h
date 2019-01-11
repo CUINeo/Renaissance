@@ -10,6 +10,6 @@ extern exc_fn exceptions[32];
 void do_exceptions(unsigned int status, unsigned int cause, context* pt_context, unsigned int bad_addr);
 void register_exception_handler(int index, exc_fn fn);
 void init_exception();
-void do_page_fault(unsigned int bad_addr);
+void tlb_refill(unsigned int bad_addr);
 
 #endif

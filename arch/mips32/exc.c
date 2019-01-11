@@ -2,10 +2,11 @@
 
 #include <driver/vga.h>
 #include <zjunix/pc.h>
+#include <zjunix/vm.h>
 #include <zjunix/utils.h>
 #include <zjunix/slab.h>
 #include <zjunix/page.h>
-#include <driver/ps2.h> 
+#include <driver/ps2.h>
 
 #pragma GCC push_options
 #pragma GCC optimize("O0")
@@ -14,7 +15,7 @@ exc_fn exceptions[32];
 int count = 0;
 int count_2 = 0;
 
-void do_page_fault(unsigned int bad_addr) {
+void tlb_refill(unsigned int bad_addr) {
     pgd_t* pgd;
     unsigned int pde_index, pte_index, pte_near_index;
     unsigned int pde, pte, pte_near;
@@ -30,20 +31,23 @@ void do_page_fault(unsigned int bad_addr) {
         : "=r"(entry_hi_test)
         );
 
-    kernel_printf("do_page_fault: bad_addr = %x    entry_hi = %x\n", bad_addr, entry_hi_test);
-    kernel_printf("            running_task: %x pid: %d\n", running_task, running_task->pid);
+    kernel_printf("bad_addr = %x    entry_hi = %x\n", bad_addr, entry_hi_test);
+    kernel_printf("running_task: %x pid: %d\n", running_task, running_task->pid);
 #endif
 
     if (running_task->mm == 0) {
-        kernel_printf("do_page_fault: mm is full!  pid: %d\n", running_task->pid);
-        goto ERROR;
+    	// struct mm_struct *mm = mm_create();
+    	// running_task->mm = mm;
+    	
+        // kernel_printf("tlb_refill: mm is full!  pid: %d\n", running_task->pid);
+        // goto ERROR;
     }
 
     pgd = running_task->mm->pgd;
     if (pgd == 0) {
         // pgd doesn't exist
-        kernel_printf("do_page_fault: pgd doesn't exist\n");
-        goto ERROR;
+        // kernel_printf("tlb_refill: pgd doesn't exist\n");
+        // goto ERROR;
     }
 
     // page align
@@ -53,27 +57,26 @@ void do_page_fault(unsigned int bad_addr) {
     pde = pgd[pde_index];
     pde &= PAGE_MASK;
 
-    if (pde == 0) {
-        // secondary page table doesn't exist
+    if (pde == 0) { //二级页表不存在
         pde = (unsigned int) kmalloc(PAGE_SIZE);
 
 #ifdef TLB_DEBUG
-        kernel_printf("do_page_fault: secondary page table doesn't exist!\n");
+        kernel_printf("tlb_refill: secondary page table doesn't exist!\n");
 #endif
 
         if (pde == 0) {
-            kernel_printf("do_page_fault: secondary page table alloc fail!\n");
+            kernel_printf("tlb_refill: secondary page table alloc fail!\n");
             goto ERROR;
         }
 
         kernel_memset((void*)pde, 0, PAGE_SIZE);
         pgd[pde_index] = pde;
         pgd[pde_index] &= PAGE_MASK;
-        pgd[pde_index] |= 0x0f;
+        pgd[pde_index] |= 0x0f; //attr
     }
 
 #ifdef  VMA_DEBUG
-    kernel_printf("do_page_fault: secondary page table address: %x\n", pde_addr);
+    kernel_printf("tlb_refill: secondary page table address: %x\n", pde_addr);
 #endif
     
     pde_ptr = (unsigned int*)pde;
@@ -84,13 +87,13 @@ void do_page_fault(unsigned int bad_addr) {
     if (pte == 0) {
         // alloc page
 #ifdef TLB_DEBUG
-    kernel_printf("do_page_fault: page not exist\n");
+    kernel_printf("page not exist\n");
 #endif
         pte = (unsigned int)kmalloc(PAGE_SIZE);
 
         if (pte == 0) {
-            kernel_printf("do_page_fault: page alloc fail!\n");
-            goto ERROR;
+            // kernel_printf("tlb_refill: page alloc fail!\n");
+            // goto ERROR;
         }
 
         kernel_memset((void*)pte, 0, PAGE_SIZE);
@@ -114,8 +117,8 @@ void do_page_fault(unsigned int bad_addr) {
         pte_near = (unsigned int)kmalloc(PAGE_SIZE);
 
         if (pte_near == 0) {
-            kernel_printf("do_page_fault: alloc pte_near_addr fail!\n");
-            goto ERROR;
+            // kernel_printf("tlb_refill: alloc pte_near_addr fail!\n");
+            // goto ERROR;
         }
 
         kernel_memset((void*)pte_near, 0, PAGE_SIZE);
@@ -129,7 +132,7 @@ void do_page_fault(unsigned int bad_addr) {
     pte_near_phy = pte_near - 0x80000000;
 
 #ifdef TLB_DEBUG
-    kernel_printf("do_page_fault: pte_phy: %x, pte_near_phy: %x\n", pte_phy, pte_near_phy);
+    kernel_printf("pte_phy: %x, pte_near_phy: %x\n", pte_phy, pte_near_phy);
 #endif
     
     if (pte_index & 0x01 == 0) {
@@ -152,8 +155,8 @@ void do_page_fault(unsigned int bad_addr) {
     entry_hi |= running_task->ASID;
     
 #ifdef TLB_DEBUG
-    kernel_printf("do_page_fault: pid: %d\n", running_task->pid);
-    kernel_printf("do_page_fault: entry_hi: %x, entry_lo0: %x, entry_lo1: %x\n", entry_hi, entry_lo0, entry_lo1);
+    kernel_printf("tlb_refill: pid: %d\n", running_task->pid);
+    kernel_printf("tlb_refill: entry_hi: %x, entry_lo0: %x, entry_lo1: %x\n", entry_hi, entry_lo0, entry_lo1);
 #endif
 
     asm volatile (
@@ -214,7 +217,7 @@ void do_exceptions(unsigned int status, unsigned int cause, context* pt_context,
     #endif
 
     if (index == 2 || index == 3) {
-        do_page_fault(bad_addr);
+        // tlb_refill(bad_addr);
         #ifdef TLB_DEBUG
         kernel_printf("refill done\n");
 
@@ -232,8 +235,8 @@ void do_exceptions(unsigned int status, unsigned int cause, context* pt_context,
         asm volatile("mfc0 %0, $8\n\t" : "=r"(badVaddr));
         //modified by Ice
         pcb = running_task;
-        kernel_printf("\nProcess %s exited due to exception cause = %x;\n", pcb->name, cause);
-        kernel_printf("status = %x, EPC = %x, BadVaddr = %x\n", status, pcb->context.epc, badVaddr);
+        kernel_printf("\nProcess %s exited due to exception cause=%x;\n", pcb->name, cause);
+        kernel_printf("status=%x, EPC=%x, BadVaddr=%x\n", status, pcb->context.epc, badVaddr);
     //    pc_kill_syscall(status, cause, pt_context);
             //Done by Ice
         while (1)
