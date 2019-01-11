@@ -17,7 +17,6 @@
 char ps_buffer[64];
 char cur_path[256];
 int ps_buffer_index;
-char absolute[256];
 
 void test_proc() {
     unsigned int timestamp;
@@ -109,26 +108,83 @@ void buddy_test(char *param) {
 }
 
 void slab_test() {
-    kernel_puts("allocate 100 memory blocks of size 100B.\n", 0xff, 0);
-
-    kernel_printf("before allocating\n");
-    buddy_info();
+    kernel_puts("allocate 5 memory blocks of size 100B.\n", 0xff, 0);
 
     int i;
-    unsigned int *blocks[100];
-    for (i = 0; i < 100; i++) {
+    unsigned int *blocks[5];
+    for (i = 0; i < 5; i++) {
         blocks[i] = kmalloc(100);
     }
 
-    kernel_printf("allocated\n");
-    buddy_info();
-
-    for (i = 0; i < 100; i++) {
+    for (i = 0; i < 5; i++) {
         kfree(blocks[i]);
     }
-    // kernel_printf("deallocated\n");
-    // buddy_info();
-                                                
+
+    kernel_printf("\n");
+}
+
+void large_slab_test() {
+    kernel_puts("allocate 10 memory blocks of size 100B.\n", 0xff, 0);
+
+    int i;
+    unsigned int *blocks[10];
+    for (i = 0; i < 10; i++) {
+        blocks[i] = kmalloc(100);
+    }
+
+    for (i = 0; i < 10; i++) {
+        kfree(blocks[i]);
+    }
+
+    kernel_printf("\n");
+}
+
+// void slab_memory_test() {
+//     kernel_puts("allocate 10 memory blocks of size 4096B.\n", 0xff, 0);
+
+//     kernel_printf("before allocating\n");
+//     buddy_info();
+
+//     int i;
+//     unsigned int *blocks[10];
+//     for (i = 0; i < 10; i++) {
+//         blocks[i] = kmalloc(4096);
+//     }
+
+//     kernel_printf("allocated\n");
+//     buddy_info();
+
+//     for (i = 0; i < 100; i++) {
+//         kfree(blocks[i]);
+//     }
+
+//     kernel_printf("\n");
+// }
+
+void virtual_memory_test() {
+    struct mm_struct* mm = mm_create();
+    kernel_printf("mm struct created, address: %x\n", mm);
+
+    unsigned int addr = 0;
+    unsigned long len = 8192;
+    // do map
+    addr = do_map(addr, len, 0);
+    kernel_printf("\n");
+
+    // // check whether in vma
+    // if (is_in_vma(addr + 4096)) {
+    //     kernel_printf("%x is in vma!\n", addr + 4096);
+    // }
+
+    // do unmap
+    do_unmap(addr, len);
+    kernel_printf("\n");
+
+    // delete mm
+    mm_delete(mm);
+    kernel_printf("\n");
+
+    kernel_printf("Test success!\n");
     kernel_printf("\n");
 }
 
@@ -136,8 +192,14 @@ void ps() {
     kernel_printf("Press any key to enter shell.\n");
     kernel_getchar();
     char c;
+    int i;
     ps_buffer_index = 0;
     ps_buffer[0] = 0;
+    for (i = 0; i < 256; i++)
+    {
+        cur_path[i] = 0;
+    }
+    cur_path[0] = '/';
     kernel_clear_screen(31); 
     kernel_puts("PowerShell\n", 0xfff, 0);
     kernel_puts("PS>> ", 0xfff, 0);
@@ -179,6 +241,12 @@ void parse_cmd() {
     char *param;
     char *src;
     char *dest;
+    char absolute[256];
+
+    for (i = 0; i < 256; i++) {
+        absolute[i] = 0;
+    }
+
     for (i = 0; i < 63; i++) {
         if (ps_buffer[i] == ' ') {
             ps_buffer[i] = 0;
@@ -230,12 +298,20 @@ void parse_cmd() {
     //     kernel_printf("kmalloc : %x, size = 1KB\n", kmalloc(1024));
     } 
     else if (kernel_strcmp(ps_buffer, "ps") == 0) {
-        // result = print_proc();
-        kernel_printf("ps return with %d\n", result);
+        if(kernel_strcmp(param, "-ready") == 0)
+             print_ready();
+         else if(kernel_strcmp(param, "-running") == 0)
+             print_running();
+         else if(kernel_strcmp(param, "-waiting") == 0)
+             print_waiting();
+         else if(kernel_strcmp(param, "-exit") == 0)
+             print_exited();
+        print_proc();
     } 
     else if (kernel_strcmp(ps_buffer, "loop") == 0) {
         kernel_printf("Loop process has been created.\n");
-        pc_create("loop", (void*)loop, 0, 0, 0);
+        // background task
+        pc_create_back("loop", (void*)loop, 4, 0, 0);
     }
     else if (kernel_strcmp(ps_buffer, "kill") == 0) {
         int pid = param[0] - '0';
@@ -252,9 +328,24 @@ void parse_cmd() {
         kernel_printf("test proc:");
         result = kernel_exec(1, (void*)param);
         kernel_printf("proc return with %d\n", result);
-    } 
+    }
+    else if(kernel_strcmp(ps_buffer, "proc&") == 0){
+     kernel_printf("test proc back:");
+        result = kernel_exec_back(1, (void*)param);
+        kernel_printf("proc_back return with %d\n", result);
+    }
     else if(kernel_strcmp(ps_buffer, "sched") == 0) {
         print_sched();
+    }
+    else if(kernel_strcmp(ps_buffer, "bg") == 0){
+    int pid = param[0] - '0';
+    kernel_printf("Moving Background PID: %d\n", pid);
+        kernel_bg(pid);
+    }
+    else if(kernel_strcmp(ps_buffer, "fg") == 0){
+    int pid = param[0] - '0';
+       kernel_printf("Moving Front PID: %d\n", pid);
+         kernel_fg(pid);
     }
     else if (kernel_strcmp(ps_buffer, "exec") == 0) {
         result = exec(param);
@@ -262,9 +353,11 @@ void parse_cmd() {
     } 
     else if (kernel_strcmp(ps_buffer, "bootmminfo") == 0) {
         bootmap_info();
+        kernel_printf("\n");
     }
     else if (kernel_strcmp(ps_buffer, "buddyinfo") == 0) {
         buddy_info();
+        kernel_printf("\n");
     } 
     else if (kernel_strcmp(ps_buffer, "mt") == 0) {
         small_block_test();
@@ -276,14 +369,19 @@ void parse_cmd() {
     else if (kernel_strcmp(ps_buffer, "st") == 0) {
         slab_test();
     }
+    else if (kernel_strcmp(ps_buffer, "lst") == 0) {
+        large_slab_test();
+    }
+    // else if (kernel_strcmp(ps_buffer, "smt") == 0) {
+    //     slab_memory_test();
+    // }
     else if (kernel_strcmp(ps_buffer, "vmt") == 0) {
-        struct mm_struct* mm = mm_create();
-        kernel_printf("mm struct created, address: %x\n", mm);
-        mm_delete(mm);
+        virtual_memory_test();
     }
     else if (kernel_strcmp(ps_buffer, "execvm") == 0) {
         kernel_printf("kernel_execvm:\n");
         kernel_execvm(1, (void*)param);
+        kernel_printf("\n");
     }
     else if (kernel_strcmp(ps_buffer, "cat") == 0) {
         //result = fs_cat(param);
